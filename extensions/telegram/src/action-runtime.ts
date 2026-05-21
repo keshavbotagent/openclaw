@@ -132,6 +132,29 @@ function readTelegramReplyToMessageId(params: Record<string, unknown>) {
   );
 }
 
+function readTelegramAttachmentMediaUrl(params: Record<string, unknown>) {
+  if (!Array.isArray(params.attachments)) {
+    return undefined;
+  }
+  for (const attachment of params.attachments) {
+    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      continue;
+    }
+    const record = attachment as Record<string, unknown>;
+    const mediaUrl =
+      readStringParam(record, "mediaUrl", { trim: false }) ??
+      readStringParam(record, "media", { trim: false }) ??
+      readStringParam(record, "path", { trim: false }) ??
+      readStringParam(record, "filePath", { trim: false }) ??
+      readStringParam(record, "fileUrl", { trim: false }) ??
+      readStringParam(record, "url", { trim: false });
+    if (mediaUrl) {
+      return mediaUrl;
+    }
+  }
+  return undefined;
+}
+
 function resolveTelegramButtonsFromParams(
   params: Record<string, unknown>,
   presentation = normalizeMessagePresentation(params.presentation),
@@ -354,7 +377,8 @@ export async function handleTelegramAction(
       readStringParam(params, "mediaUrl") ??
       readStringParam(params, "media", {
         trim: false,
-      });
+      }) ??
+      readTelegramAttachmentMediaUrl(params);
     const presentation = normalizeMessagePresentation(params.presentation);
     const buttons = resolveTelegramButtonsFromParams(params, presentation);
     const content = readTelegramSendContent({

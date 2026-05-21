@@ -561,6 +561,30 @@ describe("handleTelegramAction", () => {
     expect(options.mediaUrl).toBe("https://example.com/image.jpg");
   });
 
+  it("uses attachment paths as sendMessage media", async () => {
+    await handleTelegramAction(
+      {
+        action: "sendMessage",
+        to: "telegram:-100123:topic:879",
+        message: "1/3 Productivity",
+        attachments: [
+          {
+            type: "image",
+            path: "/tmp/customer_support_productivity.png",
+            name: "customer_support_productivity.png",
+          },
+        ],
+      },
+      telegramConfig(),
+    );
+    const call = mockCall(sendMessageTelegram, 0, "attachment media");
+    expect(call[0]).toBe("telegram:-100123:topic:879");
+    expect(call[1]).toBe("1/3 Productivity");
+    const options = requireRecord(call[2], "attachment media options");
+    expect(options.token).toBe("tok");
+    expect(options.mediaUrl).toBe("/tmp/customer_support_productivity.png");
+  });
+
   it("sends a poll", async () => {
     const result = await handleTelegramAction(
       {
