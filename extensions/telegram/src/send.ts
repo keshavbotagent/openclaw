@@ -7,7 +7,6 @@ import { formatUncaughtError } from "openclaw/plugin-sdk/error-runtime";
 import { redactSensitiveText } from "openclaw/plugin-sdk/logging-core";
 import { createTelegramRetryRunner, type RetryConfig } from "openclaw/plugin-sdk/retry-runtime";
 import { createSubsystemLogger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
-import { resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getOrCreateAccountThrottler } from "./account-throttler.js";
@@ -25,13 +24,13 @@ import {
   telegramHtmlToPlainTextFallback,
 } from "./format.js";
 import { buildInlineKeyboard } from "./inline-keyboard.js";
-import { createTelegramMessageCache, resolveTelegramMessageCachePath } from "./message-cache.js";
 import {
   isRecoverableTelegramNetworkError,
   isSafeToRetrySendError,
   isTelegramRateLimitError,
   isTelegramServerError,
 } from "./network-errors.js";
+import { recordOutboundMessageForPromptContext } from "./outbound-message-context.js";
 import { makeProxyFetch } from "./proxy.js";
 import {
   buildTelegramThreadReplyParams,
@@ -567,67 +566,6 @@ function createRequestWithChatNotFound(params: {
         input: params.input,
       });
     });
-}
-
-function inferTelegramChatType(chatId: string): "private" | "supergroup" {
-  return chatId.startsWith("-") ? "supergroup" : "private";
-}
-
-function buildOutboundCacheMessage(params: {
-  account: ResolvedTelegramAccount;
-  chatId: string;
-  message: TelegramMessageLike;
-  messageId: number;
-  text?: string;
-  messageThreadId?: number;
-}): TelegramMessageLike {
-  const chat = params.message.chat ?? {};
-  const text = params.message.text ?? params.message.caption ?? params.text;
-  return {
-    ...params.message,
-    message_id: params.messageId,
-    date:
-      typeof params.message.date === "number" && Number.isFinite(params.message.date)
-        ? params.message.date
-        : Math.floor(Date.now() / 1000),
-    chat: {
-      id: chat.id ?? params.chatId,
-      type: chat.type ?? inferTelegramChatType(params.chatId),
-      ...(chat.title ? { title: chat.title } : {}),
-      ...(chat.username ? { username: chat.username } : {}),
-    },
-    from: params.message.from ?? {
-      id: 0,
-      is_bot: true,
-      first_name: params.account.name ?? "OpenClaw",
-    },
-    ...(text ? { text } : {}),
-    ...(params.messageThreadId !== undefined ? { message_thread_id: params.messageThreadId } : {}),
-  };
-}
-
-function recordOutboundMessageForPromptContext(params: {
-  cfg: OpenClawConfig;
-  account: ResolvedTelegramAccount;
-  chatId: string;
-  message: TelegramMessageLike;
-  messageId: number;
-  text?: string;
-  messageThreadId?: number;
-}): void {
-  try {
-    const cache = createTelegramMessageCache({
-      persistedPath: resolveTelegramMessageCachePath(resolveStorePath(params.cfg.session?.store)),
-    });
-    cache.record({
-      accountId: params.account.accountId,
-      chatId: params.chatId,
-      msg: buildOutboundCacheMessage(params) as Parameters<typeof cache.record>[0]["msg"],
-      ...(params.messageThreadId !== undefined ? { threadId: params.messageThreadId } : {}),
-    });
-  } catch (error) {
-    logVerbose(`telegram: failed to record outbound message context: ${String(error)}`);
-  }
 }
 
 function createTelegramNonIdempotentRequestWithDiag(params: {
