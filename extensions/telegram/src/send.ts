@@ -7,6 +7,7 @@ import { formatUncaughtError } from "openclaw/plugin-sdk/error-runtime";
 import { redactSensitiveText } from "openclaw/plugin-sdk/logging-core";
 import { createTelegramRetryRunner, type RetryConfig } from "openclaw/plugin-sdk/retry-runtime";
 import { createSubsystemLogger, logVerbose } from "openclaw/plugin-sdk/runtime-env";
+import { resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { getOrCreateAccountThrottler } from "./account-throttler.js";
@@ -24,6 +25,7 @@ import {
   telegramHtmlToPlainTextFallback,
 } from "./format.js";
 import { buildInlineKeyboard } from "./inline-keyboard.js";
+import { createTelegramMessageCache, resolveTelegramMessageCachePath } from "./message-cache.js";
 import {
   isRecoverableTelegramNetworkError,
   isSafeToRetrySendError,
@@ -112,7 +114,12 @@ type TelegramSendResult = {
 
 type TelegramMessageLike = {
   message_id?: number;
-  chat?: { id?: string | number };
+  chat?: { id?: string | number; type?: string; title?: string; username?: string };
+  date?: number;
+  from?: { id?: number; is_bot?: boolean; first_name?: string; username?: string };
+  text?: string;
+  caption?: string;
+  message_thread_id?: number;
 };
 
 type TelegramOutboundSuccessLogParams = {
@@ -562,6 +569,67 @@ function createRequestWithChatNotFound(params: {
     });
 }
 
+function inferTelegramChatType(chatId: string): "private" | "supergroup" {
+  return chatId.startsWith("-") ? "supergroup" : "private";
+}
+
+function buildOutboundCacheMessage(params: {
+  account: ResolvedTelegramAccount;
+  chatId: string;
+  message: TelegramMessageLike;
+  messageId: number;
+  text?: string;
+  messageThreadId?: number;
+}): TelegramMessageLike {
+  const chat = params.message.chat ?? {};
+  const text = params.message.text ?? params.message.caption ?? params.text;
+  return {
+    ...params.message,
+    message_id: params.messageId,
+    date:
+      typeof params.message.date === "number" && Number.isFinite(params.message.date)
+        ? params.message.date
+        : Math.floor(Date.now() / 1000),
+    chat: {
+      id: chat.id ?? params.chatId,
+      type: chat.type ?? inferTelegramChatType(params.chatId),
+      ...(chat.title ? { title: chat.title } : {}),
+      ...(chat.username ? { username: chat.username } : {}),
+    },
+    from: params.message.from ?? {
+      id: 0,
+      is_bot: true,
+      first_name: params.account.name ?? "OpenClaw",
+    },
+    ...(text ? { text } : {}),
+    ...(params.messageThreadId !== undefined ? { message_thread_id: params.messageThreadId } : {}),
+  };
+}
+
+function recordOutboundMessageForPromptContext(params: {
+  cfg: OpenClawConfig;
+  account: ResolvedTelegramAccount;
+  chatId: string;
+  message: TelegramMessageLike;
+  messageId: number;
+  text?: string;
+  messageThreadId?: number;
+}): void {
+  try {
+    const cache = createTelegramMessageCache({
+      persistedPath: resolveTelegramMessageCachePath(resolveStorePath(params.cfg.session?.store)),
+    });
+    cache.record({
+      accountId: params.account.accountId,
+      chatId: params.chatId,
+      msg: buildOutboundCacheMessage(params) as Parameters<typeof cache.record>[0]["msg"],
+      ...(params.messageThreadId !== undefined ? { threadId: params.messageThreadId } : {}),
+    });
+  } catch (error) {
+    logVerbose(`telegram: failed to record outbound message context: ${String(error)}`);
+  }
+}
+
 function createTelegramNonIdempotentRequestWithDiag(params: {
   cfg: OpenClawConfig;
   account: ResolvedTelegramAccount;
@@ -708,6 +776,17 @@ export async function sendMessageTelegram(
       );
       const messageId = resolveTelegramMessageIdOrThrow(res, context);
       recordSentMessage(chatId, messageId, cfg);
+      recordOutboundMessageForPromptContext({
+        cfg,
+        account,
+        chatId,
+        message: res,
+        messageId,
+        text: chunk.plainText,
+        ...(acceptedParams?.message_thread_id !== undefined
+          ? { messageThreadId: acceptedParams.message_thread_id }
+          : {}),
+      });
       lastMessageId = String(messageId);
       lastChatId = String(res?.chat?.id ?? chatId);
       lastAcceptedParams = acceptedParams;
@@ -948,6 +1027,17 @@ export async function sendMessageTelegram(
     const mediaMessageId = resolveTelegramMessageIdOrThrow(result, "media send");
     const resolvedChatId = String(result?.chat?.id ?? chatId);
     recordSentMessage(chatId, mediaMessageId, cfg);
+    recordOutboundMessageForPromptContext({
+      cfg,
+      account,
+      chatId,
+      message: result,
+      messageId: mediaMessageId,
+      ...(caption ? { text: caption } : {}),
+      ...(mediaParams.message_thread_id !== undefined
+        ? { messageThreadId: mediaParams.message_thread_id }
+        : {}),
+    });
     logTelegramOutboundSendOk({
       accountId: account.accountId,
       chatId: resolvedChatId,
