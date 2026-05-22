@@ -1228,7 +1228,7 @@ export async function runCodexAppServerAttempt(
           config: params.config,
         }),
       }),
-      toolPayloadMode: contextEngineProjection ? "preserve" : "elide",
+      toolPayloadMode: "preserve",
     });
     const projectionDecision = contextEngineProjection
       ? resolveContextEngineBootstrapProjectionDecision({
