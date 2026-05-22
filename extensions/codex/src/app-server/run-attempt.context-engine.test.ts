@@ -441,6 +441,61 @@ describe("runCodexAppServerAttempt context-engine lifecycle", () => {
     await run;
   });
 
+  it("preserves redacted tool-result evidence in per-turn context-engine projections", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const contextEngine = createContextEngine({
+      assemble: vi.fn(async () => ({
+        messages: [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "toolCall",
+                name: "bash",
+                input: {
+                  command: "cat .env && echo already halved",
+                  token: "sk-1234567890abcdef",
+                },
+              },
+            ],
+            timestamp: 1,
+          } as unknown as AgentMessage,
+          {
+            role: "toolResult",
+            content: [
+              {
+                type: "toolResult",
+                toolUseId: "call-1",
+                content: "OPENAI_API_KEY=sk-1234567890abcdef\nalready halved timeoutSeconds=7200",
+              },
+            ],
+            timestamp: 2,
+          } as unknown as AgentMessage,
+        ],
+        estimatedTokens: 42,
+      })),
+    });
+    const harness = createStartedThreadHarness();
+    const params = createParams(sessionFile, workspaceDir);
+    params.contextEngine = contextEngine;
+
+    const run = runCodexAppServerAttempt(params);
+    await harness.waitForMethod("turn/start");
+
+    const inputText = getRequestInputText(harness);
+    expect(inputText).toContain("tool call: bash");
+    expect(inputText).toContain('"inputShape"');
+    expect(inputText).toContain("tool result: call-1");
+    expect(inputText).toContain("already halved timeoutSeconds=7200");
+    expect(inputText).not.toContain("[content omitted]");
+    expect(inputText).not.toContain("cat .env");
+    expect(inputText).not.toContain("sk-1234567890abcdef");
+
+    await harness.completeTurn();
+    await run;
+  });
+
   it("projects thread-bootstrap context only once for a matching context-engine epoch", async () => {
     const info = vi.spyOn(embeddedAgentLog, "info").mockImplementation(() => undefined);
     const sessionFile = path.join(tempDir, "session.jsonl");
