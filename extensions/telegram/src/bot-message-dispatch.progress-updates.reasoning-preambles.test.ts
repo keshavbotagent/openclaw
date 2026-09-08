@@ -253,6 +253,53 @@ describeTelegramDispatch("dispatchTelegramMessage progress-updates reasoning and
     },
   );
 
+  it("shows forum-topic commentary in the progress draft while enabling its durable owner", async () => {
+    const draftStream = createSequencedDraftStream(2001);
+    createTelegramDraftStream.mockReturnValue(draftStream);
+    dispatchReplyWithBufferedBlockDispatcher.mockImplementation(async ({ replyOptions }) => {
+      expect(replyOptions?.commentaryPayloadsEnabled).toBe(true);
+      expect(replyOptions?.shouldDeliverCommentaryPayloads?.()).toBe(true);
+      await replyOptions?.onReplyStart?.();
+      await replyOptions?.onAssistantMessageStart?.();
+
+      await replyOptions?.onItemEvent?.({
+        kind: "preamble",
+        itemId: "commentary-1",
+        progressText: "Checking the deployment",
+      });
+      await replyOptions?.onToolStart?.({ name: "exec", phase: "start" });
+      return { queuedFinal: false };
+    });
+
+    await dispatchWithContext({
+      context: createContext({
+        msg: {
+          chat: { id: -100123, type: "supergroup", is_forum: true },
+          message_id: 456,
+          message_thread_id: 88,
+        } as never,
+        chatId: -100123,
+        isGroup: true,
+        threadSpec: { id: 88, scope: "forum" },
+      }),
+      streamMode: "progress",
+      telegramCfg: {
+        streaming: {
+          mode: "progress",
+          progress: { toolProgress: true },
+        },
+      },
+    });
+
+    expect(draftStream.updatePreview).toHaveBeenCalledWith(
+      telegramProgressPreview(
+        "Checking the deployment\n🛠️ Exec",
+        "<b>Checking the deployment</b>\n<b>🛠️ Exec</b>",
+      ),
+    );
+    expect(deliverReplies).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       label: "progress commentary is disabled",

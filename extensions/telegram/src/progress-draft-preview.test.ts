@@ -67,6 +67,44 @@ describe("renderTelegramProgressDraftPreview", () => {
     expect(rich.complete).toBe(true);
   });
 
+  it.each([
+    { name: "a status headline", statusHeadline: "Inspecting the deployment" },
+    { name: "a plan", plan: [{ step: "Verify deployment", status: "in_progress" as const }] },
+    {
+      name: "a progress card headline and plan",
+      statusHeadline: "Inspecting the deployment",
+      plan: [{ step: "Verify deployment", status: "in_progress" as const }],
+    },
+  ])("retains enabled commentary alongside $name in both transports", (status) => {
+    const snapshot: ChannelProgressDraftCompositorSnapshot = {
+      ...status,
+      lines: [
+        { id: "reasoning:1", kind: "item", label: "Reasoning", text: "Hidden reasoning" },
+        {
+          id: "commentary:1",
+          kind: "item",
+          label: "Commentary",
+          text: "💬 The **deployment** is healthy",
+          prefix: false,
+        },
+        { id: "tool:1", kind: "tool", label: "Read", text: "Read deployment logs" },
+      ],
+    };
+    const html = renderTelegramProgressDraftPreview(snapshot, options);
+    const rich = renderTelegramProgressDraftPreview(snapshot, { ...options, richMessages: true });
+    const text = telegramHtmlToPlainTextFallback(html.text);
+    expect(text).toBe(rich.text);
+    expect(text).toContain("💬 The deployment is healthy");
+    expect(text).toContain("Read deployment logs");
+    expect(text).not.toContain("Hidden reasoning");
+    if ("plan" in status) {
+      expect(text).toContain("Verify deployment (in progress)");
+    }
+    if ("statusHeadline" in status) {
+      expect(text).toContain(status.statusHeadline);
+    }
+  });
+
   it("keeps attention and the active step within the configured window", () => {
     const preview = renderTelegramProgressDraftPreview(
       {

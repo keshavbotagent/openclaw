@@ -98,7 +98,12 @@ export function createDraftState(params: TurnConfig): TelegramDraftStateSlice {
           chatId: params.context.chatId,
           maxChars: draftMaxChars,
           thread: params.context.threadSpec,
-          replyToMessageId: params.draftReplyToMessageId,
+          // The progress status is discarded, not retained as an answer. Its
+          // preview must leave the single-use reply target for the durable final.
+          replyToMessageId:
+            laneName === "answer" && params.streamMode === "progress"
+              ? undefined
+              : params.draftReplyToMessageId,
           replyToMode: params.replyToMode,
           richMessages: params.telegramCfg.richMessages,
           linkPreview: params.telegramCfg.linkPreview,

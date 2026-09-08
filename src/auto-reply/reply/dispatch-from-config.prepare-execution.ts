@@ -202,6 +202,7 @@ export async function prepareDispatchExecution(state: ChooseDispatchRouteReadySt
       allowWhenToolSummariesHidden?: boolean;
       forwardWhenSourceDeliverySuppressed?: boolean;
       requiresToolSummaryVisibility?: boolean;
+      onStart?: (...args: Args) => Promise<void> | void;
       onForward?: (...args: Args) => Promise<void> | void;
       onVisible?: (...args: Args) => Promise<void> | void;
       waitForDirectBlockReplyDelivery?: boolean;
@@ -227,6 +228,11 @@ export async function prepareDispatchExecution(state: ChooseDispatchRouteReadySt
           if (isDispatchOperationAborted()) {
             return undefined;
           }
+        }
+        // Durable item capture shares source ordering, not preview visibility.
+        // A hidden or unavailable preview must not discard the authored item.
+        if (options?.onStart) {
+          await options.onStart(...args);
         }
         if (shouldForwardProgressCallback(options)) {
           if (preserveProgressCallbackStartOrder && options?.onForward) {
@@ -295,8 +301,12 @@ export async function prepareDispatchExecution(state: ChooseDispatchRouteReadySt
       options: params.replyOptions,
       resolveVerboseProgressVisibility,
     });
+  // An explicit durable commentary owner must not depend on verbose tool-summary
+  // visibility. Embedded/Codex runtimes expose authored commentary as preamble
+  // item events, so gating this bridge on verbose mode drops the channel payload.
   const deliverStandaloneCommentaryProgress =
-    standaloneCommentaryProgressVisible && !draftOwnsCommentaryProgress;
+    (standaloneCommentaryProgressVisible || commentaryPayloadsEnabled) &&
+    !draftOwnsCommentaryProgress;
   const itemEventForwardingOptions = {
     forwardWhenSourceDeliverySuppressed: true,
     requiresToolSummaryVisibility: true,
@@ -316,9 +326,9 @@ export async function prepareDispatchExecution(state: ChooseDispatchRouteReadySt
     ? wrapProgressCallback(params.replyOptions?.onItemEvent, {
         ...itemEventForwardingOptions,
         waitForDirectBlockReplyDelivery: true,
-        onForward: (payload) =>
+        onStart: (payload) =>
           preserveProgressCallbackStartOrder && shouldDeliverDurableCommentaryProgress(payload)
-            ? noteCommentaryProgress(payload)
+            ? noteCommentaryProgress(payload, { isCommentary: commentaryPayloadsEnabled })
             : undefined,
       })
     : undefined;
@@ -341,7 +351,7 @@ export async function prepareDispatchExecution(state: ChooseDispatchRouteReadySt
           (!forwardItemEvent || !preserveProgressCallbackStartOrder) &&
           shouldDeliverDurableCommentaryProgress(payload)
         ) {
-          await noteCommentaryProgress(payload);
+          await noteCommentaryProgress(payload, { isCommentary: commentaryPayloadsEnabled });
         }
         return await forwardItemEvent?.(payload);
       }

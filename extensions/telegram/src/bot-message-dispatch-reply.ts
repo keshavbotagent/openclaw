@@ -283,6 +283,21 @@ export async function deliverReply(
   if (payload.isError === true) {
     turn.hadErrorReplyFailureOrSkip = true;
   }
+  if (
+    turn.context.isGroup &&
+    turn.streamMode === "progress" &&
+    info.kind === "block" &&
+    effectivePayload.isCommentary === true
+  ) {
+    const delivered = await sendPayload(turn, effectivePayload, {
+      durable: true,
+      // Mid-turn commentary must not consume the final reply target in
+      // `first` or `batched` mode.
+      replyToMode: "off",
+    });
+    trackBlockMedia(turn, delivered, info.kind, effectivePayload);
+    return toTelegramReplyDeliveryResult(delivered);
+  }
 
   let blockDelivered = false;
   let finalization: Promise<{ visibleReplySent: boolean }> | undefined;

@@ -74,13 +74,12 @@ export function renderTelegramProgressDraftPreview(
   options: { richMessages: boolean; maxLines: number; maxLineChars: number },
 ): TelegramDraftPreview {
   const { maxLines, maxLineChars } = options;
+  // Enabled commentary owns activity rows instead of the status headline.
+  // A plan or progress-card headline must not suppress those authored updates.
   const activity =
     snapshot.statusHeadline || snapshot.plan?.length
       ? snapshot.lines.filter(
-          (line) =>
-            typeof line !== "string" &&
-            !line.id?.startsWith("reasoning:") &&
-            !line.id?.startsWith("commentary:"),
+          (line) => typeof line !== "string" && !line.id?.startsWith("reasoning:"),
         )
       : snapshot.lines;
   const attention = activity.filter(isChannelProgressAttentionLine);

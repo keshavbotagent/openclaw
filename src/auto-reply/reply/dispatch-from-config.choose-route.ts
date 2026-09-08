@@ -125,37 +125,67 @@ export async function chooseDispatchRoute(state: PrepareDispatchOperationReadySt
     }
     return !requiresDurableToolResultDelivery(payload);
   };
-  // Durable inter-tool commentary lane: with verbose progress on, preamble
-  // items become standalone progress messages like tool summaries. The latest
-  // text per item id is buffered (snapshot producers re-emit the same item)
-  // and flushed when the producer moves on, always before the final reply.
-  let pendingCommentaryProgress: { itemId?: string; text: string } | null = null;
-  const deliverCommentaryProgressMessage = async (text: string) => {
-    if (!shouldSendToolSummaries() || shouldSuppressProgressDelivery()) {
+  // Explicit commentary owners receive completed items as typed conversation
+  // blocks, independently of tool verbosity. Unopted channels retain the verbose
+  // tool-progress fallback. Snapshot updates are never separate durable messages.
+  type PendingCommentary = {
+    itemId?: string;
+    text: string;
+    isCommentary: boolean;
+    phase?: string;
+  };
+  let pendingCommentaryProgress: PendingCommentary | null = null;
+  const completedCommentaryItems = new Set<string>();
+  const deliverCommentaryProgressMessage = async (text: string, isCommentary: boolean) => {
+    if (
+      isCommentary
+        ? state.sendPolicyDenied || state.suppressDelivery
+        : shouldSuppressProgressDelivery() || !shouldSendToolSummaries()
+    ) {
       return;
     }
-    const payload: ReplyPayload = { text: `💬 ${text}` };
+    const payload: ReplyPayload = isCommentary
+      ? { text, isCommentary: true }
+      : { text: `💬 ${text}` };
     if (shouldSuppressLateTextOnlyToolProgress(payload)) {
       return;
     }
     if (shouldRouteToOriginating) {
-      await sendPayloadAsync(payload, undefined, false);
+      await sendPayloadAsync(payload, undefined, false, isCommentary ? "block" : "tool");
     } else {
       markInboundDedupeReplayUnsafe();
-      turnLedger.sendQueued("tool", payload);
+      // Commentary is not an answer block: do not put it in the content-only
+      // streamed-answer dedupe map or an identical final could be suppressed.
+      turnLedger.sendQueued(isCommentary ? "block" : "tool", payload);
     }
   };
   const flushPendingCommentaryProgress = async () => {
     const pending = pendingCommentaryProgress;
     pendingCommentaryProgress = null;
     const text = pending?.text.trim();
-    if (!text) {
+    if (!text || !pending) {
       return;
     }
-    await deliverCommentaryProgressMessage(text);
+    if (pending.isCommentary) {
+      // Phased producers have an authoritative completion boundary. Older
+      // unphased producers still flush when the next item/tool/final arrives.
+      if (pending.phase !== undefined && pending.phase !== "end") {
+        return;
+      }
+      if (pending.itemId) {
+        completedCommentaryItems.add(pending.itemId);
+      }
+    }
+    await deliverCommentaryProgressMessage(text, pending.isCommentary);
   };
-  const noteCommentaryProgress = async (payload: { itemId?: string; progressText?: string }) => {
+  const noteCommentaryProgress = async (
+    payload: { itemId?: string; progressText?: string; phase?: string },
+    options: { isCommentary: boolean },
+  ) => {
     const itemId = payload.itemId?.trim() || undefined;
+    if (options.isCommentary && itemId && completedCommentaryItems.has(itemId)) {
+      return;
+    }
     const text = payload.progressText ?? "";
     const repeatsBufferedText =
       pendingCommentaryProgress !== null && pendingCommentaryProgress.text.trim() === text.trim();
@@ -175,7 +205,15 @@ export async function chooseDispatchRoute(state: PrepareDispatchOperationReadySt
     if (pendingCommentaryProgress && !updatesBufferedItem) {
       await flushPendingCommentaryProgress();
     }
-    pendingCommentaryProgress = { itemId, text };
+    pendingCommentaryProgress = {
+      itemId,
+      text,
+      isCommentary: options.isCommentary,
+      phase: payload.phase,
+    };
+    if (options.isCommentary && payload.phase === "end") {
+      await flushPendingCommentaryProgress();
+    }
   };
   const shouldSuppressMessageToolOnlyTextErrorProgress = (payload: ReplyPayload) => {
     if (

@@ -216,6 +216,117 @@ describe("dispatchReplyFromConfig", () => {
     expect(dispatcher.sendFinalReply).toHaveBeenCalledExactlyOnceWith({ text: "Done." });
   });
 
+  it.each([true, false])(
+    "delivers completed commentary with verbose off and preview visibility %s",
+    async (previewVisible) => {
+      setNoAbort();
+      sessionStoreMocks.currentEntry = { verboseLevel: "off" };
+      const dispatcher = createDispatcher();
+      const onItemEvent = vi.fn(() => previewVisible);
+      const completionCounts: number[] = [];
+
+      await dispatchReplyFromConfig({
+        ctx: buildTestCtx({
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+          From: "telegram:group:-100123",
+          SessionKey: "agent:main:telegram:group:-100123:topic:547",
+          MessageThreadId: "547",
+        }),
+        cfg: automaticGroupReplyConfig,
+        dispatcher,
+        replyResolver: async (_ctx, opts) => {
+          expect(opts?.commentaryPayloadsEnabled).toBe(true);
+          await opts?.onItemEvent?.({
+            itemId: "commentary-durable-1",
+            kind: "preamble",
+            phase: "update",
+            progressText: "Checking the deployed",
+          });
+          completionCounts.push(vi.mocked(dispatcher.sendBlockReply).mock.calls.length);
+          await opts?.onItemEvent?.({
+            itemId: "commentary-durable-1",
+            kind: "preamble",
+            phase: "end",
+            progressText: "Checking the deployed revision.",
+          });
+          completionCounts.push(vi.mocked(dispatcher.sendBlockReply).mock.calls.length);
+          // A repeated completion must not send a second permanent message.
+          await opts?.onItemEvent?.({
+            itemId: "commentary-durable-1",
+            kind: "preamble",
+            phase: "end",
+            progressText: "Checking the deployed revision.",
+          });
+          // Matching text in the final is a distinct answer, not a streamed block.
+          return { text: "Checking the deployed revision." } satisfies ReplyPayload;
+        },
+        replyOptions: {
+          suppressDefaultToolProgressMessages: previewVisible,
+          progressPreambleEnabled: previewVisible,
+          commentaryPayloadsEnabled: true,
+          shouldDeliverCommentaryPayloads: () => true,
+          preserveProgressCallbackStartOrder: true,
+          onItemEvent,
+        },
+      });
+
+      expect(dispatcher.sendToolResult).not.toHaveBeenCalled();
+      expect(completionCounts).toEqual([0, 1]);
+      expect(dispatcher.sendBlockReply).toHaveBeenCalledExactlyOnceWith({
+        text: "Checking the deployed revision.",
+        isCommentary: true,
+      });
+      expect(onItemEvent).toHaveBeenCalledTimes(previewVisible ? 3 : 0);
+      expect(dispatcher.sendFinalReply).toHaveBeenCalledExactlyOnceWith({
+        text: "Checking the deployed revision.",
+      });
+    },
+  );
+
+  it.each(["message_tool_only", "send-policy"] as const)(
+    "does not let a durable commentary owner bypass %s suppression",
+    async (suppression) => {
+      setNoAbort();
+      sessionStoreMocks.currentEntry = {
+        verboseLevel: "on",
+        ...(suppression === "send-policy" ? { sendPolicy: "deny" } : {}),
+      };
+      const dispatcher = createDispatcher();
+      await dispatchReplyFromConfig({
+        ctx: buildTestCtx({
+          Provider: "telegram",
+          Surface: "telegram",
+          ChatType: "group",
+          SessionKey: "agent:main:telegram:group:-100123:topic:88",
+        }),
+        cfg: automaticGroupReplyConfig,
+        dispatcher,
+        replyOptions: {
+          sourceReplyDeliveryMode:
+            suppression === "message_tool_only" ? "message_tool_only" : undefined,
+          commentaryPayloadsEnabled: true,
+          shouldDeliverCommentaryPayloads: () => true,
+          preserveProgressCallbackStartOrder: true,
+          onItemEvent: () => false,
+        },
+        replyResolver: async (_ctx, opts) => {
+          await opts?.onItemEvent?.({
+            kind: "preamble",
+            phase: "end",
+            itemId: "private-commentary",
+            progressText: "Private progress",
+          });
+          return { text: "Private result" };
+        },
+      });
+      expect(dispatcher.sendToolResult).not.toHaveBeenCalled();
+      expect(dispatcher.sendBlockReply).not.toHaveBeenCalled();
+      expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([
     { surface: "slack", verboseLevel: "on", nextVerboseLevel: "off", durableCommentary: true },
     { surface: "slack", verboseLevel: "off", nextVerboseLevel: "on", durableCommentary: false },

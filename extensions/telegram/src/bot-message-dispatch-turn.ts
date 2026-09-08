@@ -271,12 +271,13 @@ export async function runTelegramDispatchTurn(turn: Turn) {
             commentaryProgressEnabled:
               turn.streamMode === "progress" ? turn.commentaryProgressEnabled : undefined,
             progressPreambleEnabled: turn.progressPreambleEnabled,
-            commentaryPayloadsEnabled: turn.progressPreambleEnabled,
-            // The progress draft is the only commentary owner and retires before
-            // the clean final. A durable copy would restore the queue burst this
-            // owner boundary prevents; verbose still controls durable tool output.
+            commentaryPayloadsEnabled:
+              turn.progressPreambleEnabled || (context.isGroup && turn.streamMode === "progress"),
+            // Group and forum-topic commentary also belongs to the durable
+            // conversation history. The item-event path still mirrors it into the
+            // progress draft for immediate visibility, matching the DM experience.
             shouldDeliverCommentaryPayloads:
-              turn.progressPreambleEnabled === true ? () => false : undefined,
+              turn.streamMode === "progress" ? () => context.isGroup : undefined,
             reasoningPayloadsEnabled: turn.durableReasoningPayloadsEnabled,
             onToolStart: (payload) => handleToolStart(turn, payload),
             onItemEvent: (payload) => handleItemEvent(turn, payload),

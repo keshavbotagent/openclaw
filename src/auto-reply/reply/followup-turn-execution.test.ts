@@ -392,7 +392,7 @@ describe("executeFollowupTurn", () => {
       expectedDurableCommentary: true,
     },
   ] as const)(
-    "suppresses queued verbose-off preambles $owner",
+    "admits queued verbose-off preambles only to a commentary owner: $owner",
     async ({ ownerOptions, expectedDurableCommentary }) => {
       const onItemEvent = vi.fn(async () => true as const);
       let preambleVisible: boolean | void = true;
@@ -427,8 +427,8 @@ describe("executeFollowupTurn", () => {
       await result.progress.drain();
 
       expect(result.commentaryPayloadsEnabled).toBe(expectedDurableCommentary);
-      expect(preambleVisible).toBe(false);
-      expect(onItemEvent).not.toHaveBeenCalled();
+      expect(preambleVisible).toBe(expectedDurableCommentary);
+      expect(onItemEvent).toHaveBeenCalledTimes(expectedDurableCommentary ? 1 : 0);
     },
   );
 
@@ -442,6 +442,7 @@ describe("executeFollowupTurn", () => {
     const onCompactionEnd = vi.fn(async () => {});
     const onReasoningEnd = vi.fn(async () => {});
     const onNarrationUpdate = vi.fn(async () => {});
+    const onItemEvent = vi.fn(async () => true);
     state.execute.mockImplementation(async (params: AgentTurnParams) => {
       await params.typingSignals.signalRunStart();
       await params.opts?.onToolResult?.({ text: "private progress" });
@@ -449,6 +450,7 @@ describe("executeFollowupTurn", () => {
       await params.opts?.onCompactionEnd?.();
       await params.opts?.onReasoningEnd?.();
       await params.opts?.onNarrationUpdate?.({ text: "private narration" });
+      await params.opts?.onItemEvent?.({ kind: "preamble", progressText: "private commentary" });
       return { runId: "run-1", outcome: { kind: "rejected", payload: { text: "done" } } };
     });
 
@@ -464,6 +466,9 @@ describe("executeFollowupTurn", () => {
           onCompactionEnd,
           onReasoningEnd,
           onNarrationUpdate,
+          commentaryPayloadsEnabled: true,
+          shouldDeliverCommentaryPayloads: () => true,
+          onItemEvent,
         },
       },
       onToolResult,
@@ -478,6 +483,7 @@ describe("executeFollowupTurn", () => {
     expect(onCompactionEnd).not.toHaveBeenCalled();
     expect(onReasoningEnd).not.toHaveBeenCalled();
     expect(onNarrationUpdate).not.toHaveBeenCalled();
+    expect(onItemEvent).not.toHaveBeenCalled();
   });
 
   it("routes channel-forced tool progress through the channel when verbosity is off", async () => {

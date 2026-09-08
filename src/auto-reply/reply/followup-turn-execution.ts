@@ -213,11 +213,13 @@ export async function executeFollowupTurn(params: {
     onItemEvent: sourceOpts?.onItemEvent
       ? (item) =>
           enqueueProgressResult(async () => {
-            // Only an explicit draft-vs-durable owner contract may bypass hidden
-            // tool-progress filtering for queued preambles.
-            const draftOwnsPreamble =
-              progressAllowed() && item.kind === "preamble" && draftOwnsCommentaryProgress;
-            if (!draftOwnsPreamble && !shouldEmitStructuredProgress()) {
+            // Both explicit commentary owners need the item event even when
+            // tool progress is hidden; the retained core callback owns delivery.
+            const ownedPreamble =
+              progressAllowed() &&
+              item.kind === "preamble" &&
+              (draftOwnsCommentaryProgress || commentaryPayloadsEnabled);
+            if (!ownedPreamble && !shouldEmitStructuredProgress()) {
               return false;
             }
             const visible = (

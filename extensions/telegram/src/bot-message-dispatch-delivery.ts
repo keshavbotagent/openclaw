@@ -63,6 +63,7 @@ type TelegramDeliveryConfig = TurnConfig & {
 type TelegramSendPayloadOptions = {
   afterAcceptedDraft?: boolean;
   durable?: boolean;
+  replyToMode?: Turn["replyToMode"];
   silent?: boolean;
   mirrorTranscript?: boolean;
   promptContextSequence?: TelegramPromptContextProjectionSequence;
@@ -236,7 +237,8 @@ export async function sendPayload(
         targetedPayload,
       )
     : targetedPayload;
-  const effectiveReplyToMode = consumedSingleUseReply ? "off" : turn.replyToMode;
+  const effectiveReplyToMode =
+    options?.replyToMode ?? (consumedSingleUseReply ? "off" : turn.replyToMode);
   const projectionSequence =
     options?.promptContextSequence ??
     createPromptContextSequence(
