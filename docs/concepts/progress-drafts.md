@@ -363,10 +363,10 @@ Limit how many lines stay visible (default 8):
 }
 ```
 
-With `toolProgress: true`, command exit rows use ordinary tool-log capacity,
-including exits with a code other than `0`. Older exits scroll out as newer
-activity arrives and do not reduce the plan's line budget. Approval requests
-and explicit `failed`, `error`, or `blocked` states still take priority. With
+With `toolProgress: true`, command exit rows and failed command tool rows use
+ordinary tool-log capacity. Older rows scroll out as newer activity arrives and
+do not reduce the plan's line budget. Approval requests, blocked/error states,
+and non-command failures still take priority. With
 the tool log hidden, tool failures and nonzero exits are hidden too; approval
 requests remain visible.
 
