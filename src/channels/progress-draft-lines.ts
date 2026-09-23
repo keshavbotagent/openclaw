@@ -19,6 +19,8 @@ export type ChannelProgressDraftLine = {
   complete?: boolean;
   /** Normalized tool name when the line represents tool work. */
   toolName?: string;
+  /** Command tool items are rolling activity even when their status is failed. */
+  commandBearing?: boolean;
   /** Whether final formatting should add a bullet/line prefix. */
   prefix?: boolean;
 };
@@ -55,6 +57,20 @@ export function isChannelProgressAttentionLine(line: string | ChannelProgressDra
     status === "error" ||
     status === "blocked" ||
     (status?.startsWith("exit ") === true && status !== "exit 0")
+  );
+}
+
+/** Lines that reserve bounded progress capacity in active tool-log drafts. */
+export function isChannelProgressPriorityLine(line: string | ChannelProgressDraftLine): boolean {
+  if (typeof line === "string") {
+    return false;
+  }
+  const status = line.status?.toLowerCase();
+  if (line.kind === "item" && line.commandBearing && status === "failed") {
+    return false;
+  }
+  return (
+    line.kind === "approval" || status === "failed" || status === "error" || status === "blocked"
   );
 }
 

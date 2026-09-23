@@ -1,3 +1,4 @@
+import { buildChannelProgressDraftLine } from "openclaw/plugin-sdk/channel-outbound";
 import { expect, it, vi } from "vitest";
 import {
   createBot,
@@ -15,9 +16,45 @@ import type { DispatchReplyWithBufferedBlockDispatcherArgs } from "./bot-message
 import type * as TelegramDeliveryModule from "./bot/delivery.replies.js";
 import type { TelegramDraftStream } from "./draft-stream.js";
 import type * as TelegramDraftModule from "./draft-stream.js";
+import { renderTelegramProgressDraftPreview } from "./progress-draft-preview.js";
 import type * as TelegramEditModule from "./send-edit.js";
 
 describeTelegramDispatch("dispatchTelegramMessage progress cards", () => {
+  it.each([false, true])(
+    "keeps a full plan and recent activity after failed command items (rich: %s)",
+    (richMessages) => {
+      const commandLines = Array.from({ length: 8 }, (_, index) =>
+        buildChannelProgressDraftLine(
+          {
+            event: "item",
+            itemKind: "command",
+            itemId: `command-${index}`,
+            name: "exec",
+            status: "failed",
+            meta: `command ${index}`,
+          },
+          { commandText: "raw" },
+        ),
+      ).filter((line) => line !== undefined);
+      const preview = renderTelegramProgressDraftPreview(
+        {
+          lines: commandLines,
+          plan: [
+            { step: "Inspect", status: "completed" },
+            { step: "Repair", status: "in_progress" },
+            { step: "Verify", status: "pending" },
+          ],
+        },
+        { richMessages, toolProgress: true, maxLines: 5, maxLineChars: 300 },
+      );
+      expect(preview.text).toContain("Inspect");
+      expect(preview.text).toContain("Repair");
+      expect(preview.text).toContain("Verify");
+      expect(preview.text).toContain("command 7");
+      expect(preview.text).not.toContain("command 0");
+    },
+  );
+
   // The real compositor, renderer and transport expose short sends, stopped
   // streams and lifecycle resets at Telegram's stubbed network boundary.
   it.each([

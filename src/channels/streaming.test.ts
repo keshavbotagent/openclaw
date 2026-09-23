@@ -9,6 +9,7 @@ import {
   formatPlanChecklistLines,
   normalizeAgentPlanSteps,
   isChannelProgressDraftWorkToolName,
+  isChannelProgressPriorityLine,
   mergeChannelProgressDraftLine,
   resolveChannelPreviewStreamMode,
   resolveChannelStreamingBlockCoalesce,
@@ -21,6 +22,19 @@ import {
 } from "./streaming.js";
 
 describe("buildChannelProgressDraftLine", () => {
+  it("demotes failed command items but keeps blocked commands and other failures protected", () => {
+    const line = buildChannelProgressDraftLine({
+      event: "item",
+      itemKind: "command",
+      name: "exec",
+      status: "failed",
+    });
+    expect(line?.commandBearing).toBe(true);
+    expect(line && isChannelProgressPriorityLine(line)).toBe(false);
+    expect(line && isChannelProgressPriorityLine({ ...line, status: "blocked" })).toBe(true);
+    expect(line && isChannelProgressPriorityLine({ ...line, commandBearing: false })).toBe(true);
+  });
+
   it("keeps prepared titles and failure outcomes when detail text is unchanged", () => {
     const input = {
       event: "item" as const,

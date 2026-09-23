@@ -23,6 +23,9 @@ function isTelegramProgressPriorityLine(line: ChannelProgressDraftCompositorLine
     return false;
   }
   const status = line.status?.toLowerCase();
+  if (line.kind === "item" && line.commandBearing && status === "failed") {
+    return false;
+  }
   return (
     line.kind === "approval" || status === "failed" || status === "error" || status === "blocked"
   );

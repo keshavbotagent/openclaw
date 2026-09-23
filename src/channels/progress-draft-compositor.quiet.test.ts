@@ -17,6 +17,59 @@ function createTestProgressDraftCompositor(
 }
 
 describe("createChannelProgressDraftCompositor quiet drafts", () => {
+  it("lets failed command items scroll out while retaining the plan and explicit failures", async () => {
+    const update = vi.fn();
+    const progress = createTestProgressDraftCompositor({
+      entry: {
+        streaming: {
+          mode: "progress",
+          progress: { toolProgress: true, maxLines: 5, label: false },
+        },
+      },
+      update,
+    });
+    try {
+      await progress.pushPlanProgress([
+        { step: "Inspect", status: "completed" },
+        { step: "Repair", status: "in_progress" },
+        { step: "Verify", status: "pending" },
+      ]);
+      for (let index = 0; index < 8; index++) {
+        await progress.pushItemEvent(
+          projectAgentToolActivity({
+            name: "exec",
+            toolCallId: `failed-command-${index}`,
+            phase: "result",
+            status: "failed",
+          }),
+        );
+      }
+      await progress.pushItemEvent({
+        itemId: "real-failure",
+        kind: "tool",
+        name: "read",
+        status: "failed",
+        progressText: "Read failed",
+      });
+      for (let index = 0; index < 3; index++) {
+        await progress.pushToolEvent({ name: "read", toolCallId: `new-${index}`, phase: "start" });
+      }
+      const snapshot = progress.getSnapshot();
+      expect(
+        snapshot.lines.some(
+          (line) => typeof line === "object" && line.id === "tool:failed-command-0",
+        ),
+      ).toBe(false);
+      expect(
+        snapshot.lines.some((line) => typeof line === "object" && line.id === "real-failure"),
+      ).toBe(true);
+      expect(update.mock.lastCall?.[0]).toContain("Repair");
+      expect(update.mock.lastCall?.[0]).toContain("Read failed");
+    } finally {
+      progress.cancel();
+    }
+  });
+
   it("preserves the shipped summary presentation for external SDK callers", async () => {
     const update = vi.fn();
     const progress = createTestProgressDraftCompositor({

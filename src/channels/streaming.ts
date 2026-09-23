@@ -31,6 +31,7 @@ import {
 import {
   getProgressDraftLineText,
   isChannelProgressAttentionLine,
+  isChannelProgressPriorityLine,
   type ChannelProgressDraftLine,
 } from "./progress-draft-lines.js";
 import {
@@ -38,7 +39,10 @@ import {
   type StreamingCompatEntry,
 } from "./streaming-config-readers.js";
 
-export { isChannelProgressAttentionLine } from "./progress-draft-lines.js";
+export {
+  isChannelProgressAttentionLine,
+  isChannelProgressPriorityLine,
+} from "./progress-draft-lines.js";
 export type { ChannelProgressDraftLine } from "./progress-draft-lines.js";
 
 export {
@@ -223,17 +227,6 @@ export type ChannelProgressDraftLineInput =
     };
 
 type ChannelProgressDraftLineKind = ChannelProgressDraftLineInput["event"];
-
-/** Lines that reserve bounded progress capacity. */
-export function isChannelProgressPriorityLine(line: string | ChannelProgressDraftLine): boolean {
-  if (typeof line === "string") {
-    return false;
-  }
-  const status = line.status?.toLowerCase();
-  return (
-    line.kind === "approval" || status === "failed" || status === "error" || status === "blocked"
-  );
-}
 
 type ProgressDraftLineMetadata = {
   correlationKey?: string;
@@ -524,6 +517,9 @@ export function buildChannelProgressDraftLine(
           id: resolveProgressDraftLineId(input),
           status: input.status,
         });
+        if (isCommandProgressItem(input)) {
+          line.commandBearing = true;
+        }
         if (input.title?.trim() && !isCommandProgressItem(input)) {
           line.label = input.title.trim();
           line.detail =
